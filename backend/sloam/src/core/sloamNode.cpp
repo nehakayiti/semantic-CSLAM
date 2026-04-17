@@ -164,6 +164,20 @@ void SLOAMNode::initParams_() {
   // Frame Ids
   nh_.param<std::string>("map_frame_id", map_frame_id_, "map");
   ROS_DEBUG_STREAM("MAP FRAME " << map_frame_id_);
+
+  // initialize candidate loop closure buffer with parameters
+  candidate_loop_closure_buffer(CandidateLoopClosureBuffer::Params{})
+
+  CandidateLoopClosureBuffer::Params lc_params;
+  lc_params.max_buffer_size = 50;
+  lc_params.repeat_count_threshold = 2;
+  lc_params.minimum_inliers = 20;
+  lc_params.maximum_residual = 1.0;
+  lc_params.max_translation_diff = 1.0;
+  lc_params.max_rotation_diff_deg = 15.0;
+  lc_params.max_pose_index_diff = 2;
+
+  candidate_loop_closure_buffer = CandidateLoopClosureBuffer(lc_params);
 }
 
 // TODO: visualize transmitted objects in a different color
@@ -600,10 +614,38 @@ void SLOAMNode::interLoopClosureThread_() {
         }
         
         SE3 tfFromQuery2RefSE3;
-        tfFromQuery2RefSE3 = SE3(tfFromQuery2Ref);
-        dbMutex.lock();
-        dbManager.loopClosureTf[query_robot_id] = tfFromQuery2RefSE3;
-        dbMutex.unlock();
+        tfFromQuery2RefSE3 = SE3(tfFromQuery2Ref); // may get removed ?
+
+        // add candiate loop closure generation here
+
+        // loop closure acceptance
+        LoopClosureCandidate candidate;
+        candidate.host_robot_id = dbManager.getHostRobotID();
+        candidate.target_robot_id = query_robot_id;
+
+        // from candidate loop closure generation: host_pose_idx, target_pose_idx, tfFromQuery2RefSE3, num_inliers, residual
+        candidate.host_pose_idx = host_pose_idx;
+        candidate.target_pose_idx = target_pose_idx;
+
+        candidate.TF_target_to_host = tfFromQuery2RefSE3;
+        candidate.num_inliers = num_inliers;
+        candidate.residual = residual;
+
+        // add candidate to the buffer and check if it can be accepted
+        auto accepted = candidate_loop_closure_buffer.addCandidate(candidate);
+
+        if (accepted.has_value()) {
+          ROS_INFO_STREAM("INTER LOOP CLOSURE ACCEPTED BETWEEN ROBOTS: " << query_robot_id << " AND " << dbManager.getHostRobotID());
+          
+          // store accepted transform into existing map
+          dbMutex.lock();
+          dbManager.loopClosureTf[query_robot_id] = accepted->TF_target_to_host;
+          dbMutex.unlock();
+
+          // queue accepted closure for factor graph insertion
+          std::lock_guard<std::mutex> lock(acceptedLoopClosuresMtx_);
+          pending_accepted_loop_closures.push_back(*accepted);
+        }
       }
     }
     rate.sleep();
@@ -742,6 +784,36 @@ bool SLOAMNode::runSLOAMNode(const SE3 &relativeRawOdomMotion,
                      << factorGraph_.getPoseCounterById(robotID));
     ROS_ERROR_STREAM("KeyPoseTimeStamps.size() is not equal to "
                      "factorGraph_.getPoseCounterById(robotID)");
+  }
+
+  // takes accepted loop closures out of que and add them into factor graph
+  std::vector<AcceptedLoopClosure> accepted_to_insert;
+  {
+    std::lock_guard<std::mutex> lock(acceptedLoopClosuresMtx_);
+    accepted_to_insert.swap(pending_accepted_loop_closures);
+  }
+
+  // loop through accepted loop closures
+  for (const auto& accepted : accepted_to_insert) {
+    ROS_INFO_STREAM("Inserting accepted inter loop closure between host robot " << accepted.host_robot_id
+                    << " and target robot " << accepted.target_robot_id
+                    << " into factor graph");
+    
+    Eigen::Matrix3d rotation_matrix = accepted.TF_target_to_host.matrix().block<3, 3>(0, 0);
+    Eigen::Vector3d translation_vector = accepted.TF_target_to_host.matrix().block<3, 1>(0, 3);
+  
+    // build GTSAM pose from SE3
+    gtsam::Pose3 relativePose(gtsam::Rot3(rotation_matrix), gtsam::Point3(translation_vector));
+
+    // add to factor graph
+    factorGraphMtx_.lock();
+    factorGraph_.addLoopClosureFactor(
+      relativePose,
+      accepted.host_pose_idx,
+      accepted.host_robot_id,
+      accepted.target_pose_idx,
+      accepted.target_robot_id);
+    factorGraphMtx_.unlock();
   }
 
   // PERFORM INTER-ROBOT LOOP CLOSURE, UPDATE MAP, ADD OBSERVATION, AND

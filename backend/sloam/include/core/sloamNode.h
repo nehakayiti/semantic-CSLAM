@@ -46,6 +46,8 @@
 #include <random>
 #include <thread>
 
+#include "core/candidate_loop_closure_buffer.h"
+
 using Point = pcl::PointXYZI;
 using Cloud = pcl::PointCloud<Point>;
 
@@ -198,5 +200,12 @@ class SLOAMNode : public sloam {
   void getCentroidSubmap(const std::vector<SE3> &allCentroids,
                          std::vector<SE3> &submapCentroids, const SE3 &pose,
                          const double &radius);
+
+  // loop closure candidate buffer
+  CandidateLoopClosureBuffer candidate_loop_closure_buffer;
+
+  std::mutex acceptedLoopClosuresMtx;
+  std::vector<AcceptedLoopClosure> pending_accepted_loop_closures;
+
 };
 }  // namespace sloam
