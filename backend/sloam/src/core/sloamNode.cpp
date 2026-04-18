@@ -165,19 +165,23 @@ void SLOAMNode::initParams_() {
   nh_.param<std::string>("map_frame_id", map_frame_id_, "map");
   ROS_DEBUG_STREAM("MAP FRAME " << map_frame_id_);
 
-  // initialize candidate loop closure buffer with parameters
-  candidate_loop_closure_buffer(CandidateLoopClosureBuffer::Params{})
 
-  CandidateLoopClosureBuffer::Params lc_params;
-  lc_params.max_buffer_size = 50;
-  lc_params.repeat_count_threshold = 2;
-  lc_params.minimum_inliers = 20;
-  lc_params.maximum_residual = 1.0;
-  lc_params.max_translation_diff = 1.0;
-  lc_params.max_rotation_diff_deg = 15.0;
-  lc_params.max_pose_index_diff = 2;
+  // initialize candidate loop closure buffer
+  inter_lc_buffer_params_.max_candidates = 10;
+  inter_lc_buffer_params_.repeat_count_threshold = 2;
 
-  candidate_loop_closure_buffer = CandidateLoopClosureBuffer(lc_params);
+  // Existing inter-robot code path does not provide these values yet.
+  // Keep them permissive for now.
+  //inter_lc_buffer_params_.minimum_inliers = 0;
+  //inter_lc_buffer_params_.maximum_residual = 1e9;
+
+  inter_lc_buffer_params_.max_translation_diff = 1.0;
+  inter_lc_buffer_params_.max_rotation_diff_deg = 15.0;
+  //inter_lc_buffer_params_.max_pose_index_diff = 0;
+
+  candidate_loop_closure_buffer_ = std::make_unique<CandidateLoopClosureBuffer>(inter_lc_buffer_params_);
+
+
 }
 
 // TODO: visualize transmitted objects in a different color
@@ -578,73 +582,65 @@ void SLOAMNode::interLoopClosureThread_() {
                          << query_robot_id << " AND " << dbManager.getHostRobotID());
       } else {
         ROS_WARN("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
-        ROS_WARN_STREAM("INTER LOOP CLOSURE FOUND BETWEEN ROBOTS: "
+        ROS_WARN_STREAM("CANDIDATE INTER LOOP CLOSURE FOUND BETWEEN ROBOTS: "
                          << query_robot_id << " AND " << dbManager.getHostRobotID());
-      }
+      
+        SE3 tfFromQuery2RefSE3 = SE3(tfFromQuery2Ref);
 
-      if (found_inter_loop_closure) {
-        num_successful_inter_loop_closure++;
-        ROS_WARN_STREAM("INTER LOOP CLOSURE FOUND BETWEEN ROBOTS: "
-                         << query_robot_id << " AND " << dbManager.getHostRobotID());
-        ros::Time inter_loop_closure_end = ros::Time::now();
-        inter_loop_closure_time.push_back(
-            (inter_loop_closure_end - inter_loop_closure_start).toSec());
-        ROS_INFO_STREAM(
+        // Pass the found inter-robot loop closure through the buffer
+        LoopClosureCandidate candidate;
+        candidate.hostRobotID = dbManager.getHostRobotID();
+        candidate.targetRobotID = query_robot_id;
+        //candidate.hostPoseIdx = 0;
+        //candidate.targetPoseIdx = 0;
+        candidate.TF_target_to_host = tfFromQuery2RefSE3;
+
+        auto accepted = candidate_loop_closure_buffer_->addCandidate(candidate);
+
+        if (accepted.has_value()) {
+          num_successful_inter_loop_closure++;
+          last_inter_loop_closure_stamp_ = ros::Time::now();
+
+          ros::Time inter_loop_closure_end = ros::Time::now();
+          inter_loop_closure_time.push_back(
+              (inter_loop_closure_end - inter_loop_closure_start).toSec());
+
+          ROS_INFO_STREAM("INTER LOOP CLOSURE ACCEPTED BETWEEN ROBOTS: "
+                          << query_robot_id << " AND "
+                          << dbManager.getHostRobotID());
+
+          ROS_INFO_STREAM(
             "Inter Loop Closure took "
             << (inter_loop_closure_end - inter_loop_closure_start).toSec()
             << " seconds"
             << "to match two maps with size " << reference_map.size() << " and "
             << query_map.size());
-        // print tfFromQuery2Ref
-        ROS_INFO_STREAM("relatively transformation tfFromQuery2Ref is: " << tfFromQuery2Ref);
-        ROS_WARN_STREAM("Saving inter robot TF results");
-        if (save_inter_robot_closure_results_){
-          std::ofstream myfile;
-          std::string fname = save_results_dir_ + "/inter-robot-tf-" +
-                              std::to_string(query_robot_id) + "-" +
-                              std::to_string(dbManager.getHostRobotID()) + "-" +
-                              std::to_string(ros::Time::now().toSec()) + ".txt"; 
-          myfile.open(fname); 
-          for (int temp_i = 0; temp_i < 4; temp_i++) {
-            for (int temp_j = 0; temp_j < 4; temp_j++) {
-              myfile << tfFromQuery2Ref(temp_i, temp_j) << " ";
+          // print tfFromQuery2Ref
+          ROS_INFO_STREAM("relatively transformation tfFromQuery2Ref is: " << tfFromQuery2Ref);
+          ROS_WARN_STREAM("Saving inter robot TF results");
+
+          if (save_inter_robot_closure_results_) {
+            std::ofstream myfile;
+            std::string fname = save_results_dir_ + "/inter-robot-tf-" +
+                                std::to_string(query_robot_id) + "-" +
+                                std::to_string(dbManager.getHostRobotID()) + "-" +
+                                std::to_string(ros::Time::now().toSec()) + ".txt";
+            myfile.open(fname);
+            for (int temp_i = 0; temp_i < 4; temp_i++) {
+              for (int temp_j = 0; temp_j < 4; temp_j++) {
+                myfile << tfFromQuery2Ref(temp_i, temp_j) << " ";
+              }
+              myfile << "\n";
             }
-            myfile << "\n";
           }
-        }
-        
-        SE3 tfFromQuery2RefSE3;
-        tfFromQuery2RefSE3 = SE3(tfFromQuery2Ref); // may get removed ?
 
-        // add candiate loop closure generation here
-
-        // loop closure acceptance
-        LoopClosureCandidate candidate;
-        candidate.host_robot_id = dbManager.getHostRobotID();
-        candidate.target_robot_id = query_robot_id;
-
-        // from candidate loop closure generation: host_pose_idx, target_pose_idx, tfFromQuery2RefSE3, num_inliers, residual
-        candidate.host_pose_idx = host_pose_idx;
-        candidate.target_pose_idx = target_pose_idx;
-
-        candidate.TF_target_to_host = tfFromQuery2RefSE3;
-        candidate.num_inliers = num_inliers;
-        candidate.residual = residual;
-
-        // add candidate to the buffer and check if it can be accepted
-        auto accepted = candidate_loop_closure_buffer.addCandidate(candidate);
-
-        if (accepted.has_value()) {
-          ROS_INFO_STREAM("INTER LOOP CLOSURE ACCEPTED BETWEEN ROBOTS: " << query_robot_id << " AND " << dbManager.getHostRobotID());
-          
-          // store accepted transform into existing map
           dbMutex.lock();
           dbManager.loopClosureTf[query_robot_id] = accepted->TF_target_to_host;
           dbMutex.unlock();
-
-          // queue accepted closure for factor graph insertion
-          std::lock_guard<std::mutex> lock(acceptedLoopClosuresMtx_);
-          pending_accepted_loop_closures.push_back(*accepted);
+        } else {
+          ROS_WARN_STREAM("INTER LOOP CLOSURE REJECTED BY BUFFER BETWEEN ROBOTS: "
+                          << query_robot_id << " AND "
+                          << dbManager.getHostRobotID());
         }
       }
     }
@@ -784,36 +780,6 @@ bool SLOAMNode::runSLOAMNode(const SE3 &relativeRawOdomMotion,
                      << factorGraph_.getPoseCounterById(robotID));
     ROS_ERROR_STREAM("KeyPoseTimeStamps.size() is not equal to "
                      "factorGraph_.getPoseCounterById(robotID)");
-  }
-
-  // takes accepted loop closures out of que and add them into factor graph
-  std::vector<AcceptedLoopClosure> accepted_to_insert;
-  {
-    std::lock_guard<std::mutex> lock(acceptedLoopClosuresMtx_);
-    accepted_to_insert.swap(pending_accepted_loop_closures);
-  }
-
-  // loop through accepted loop closures
-  for (const auto& accepted : accepted_to_insert) {
-    ROS_INFO_STREAM("Inserting accepted inter loop closure between host robot " << accepted.host_robot_id
-                    << " and target robot " << accepted.target_robot_id
-                    << " into factor graph");
-    
-    Eigen::Matrix3d rotation_matrix = accepted.TF_target_to_host.matrix().block<3, 3>(0, 0);
-    Eigen::Vector3d translation_vector = accepted.TF_target_to_host.matrix().block<3, 1>(0, 3);
-  
-    // build GTSAM pose from SE3
-    gtsam::Pose3 relativePose(gtsam::Rot3(rotation_matrix), gtsam::Point3(translation_vector));
-
-    // add to factor graph
-    factorGraphMtx_.lock();
-    factorGraph_.addLoopClosureFactor(
-      relativePose,
-      accepted.host_pose_idx,
-      accepted.host_robot_id,
-      accepted.target_pose_idx,
-      accepted.target_robot_id);
-    factorGraphMtx_.unlock();
   }
 
   // PERFORM INTER-ROBOT LOOP CLOSURE, UPDATE MAP, ADD OBSERVATION, AND

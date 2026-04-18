@@ -47,6 +47,7 @@
 #include <thread>
 
 #include "core/candidate_loop_closure_buffer.h"
+#include <memory>
 
 using Point = pcl::PointXYZI;
 using Cloud = pcl::PointCloud<Point>;
@@ -201,11 +202,9 @@ class SLOAMNode : public sloam {
                          std::vector<SE3> &submapCentroids, const SE3 &pose,
                          const double &radius);
 
-  // loop closure candidate buffer
-  CandidateLoopClosureBuffer candidate_loop_closure_buffer;
-
-  std::mutex acceptedLoopClosuresMtx;
-  std::vector<AcceptedLoopClosure> pending_accepted_loop_closures;
+  // inter-robot loop closure candidate buffer
+  CandidateLoopClosureBuffer::Params inter_lc_buffer_params_;
+  std::unique_ptr<CandidateLoopClosureBuffer> candidate_loop_closure_buffer_;
 
 };
 }  // namespace sloam
