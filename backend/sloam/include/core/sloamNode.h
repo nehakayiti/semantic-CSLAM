@@ -214,7 +214,7 @@ class SLOAMNode : public sloam {
   string inter_robot_stability_eval_csv_file_;
   InterRobotLCStabilityEvalLogger inter_robot_stability_eval_logger_;
   std::mutex inter_robot_stability_eval_mtx_;
-  std::unordered_map<int, PendingInterRobotStabilityEvalEvent> Spending_inter_robot_stability_eval_events_;
+  std::unordered_map<int, PendingInterRobotStabilityEvalEvent> pending_inter_robot_stability_eval_events_;
   int inter_robot_stability_eval_event_counter_ = 0;
 
 };

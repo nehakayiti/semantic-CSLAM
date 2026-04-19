@@ -178,12 +178,12 @@ void SLOAMNode::initParams_() {
   // initialize candidate loop closure buffer
 
   // with buffer
-  inter_lc_buffer_params_.max_candidates = 10;
-  inter_lc_buffer_params_.repeat_count_threshold = 2;
+  // inter_lc_buffer_params_.max_candidates = 10;
+  // inter_lc_buffer_params_.repeat_count_threshold = 2;
 
   // without buffer
-  inter_lc_buffer_params_.max_candidates = 10;
-  inter_lc_buffer_params_.repeat_count_threshold = 2;
+  inter_lc_buffer_params_.max_candidates = 1;
+  inter_lc_buffer_params_.repeat_count_threshold = 1;
 
   // Existing inter-robot code path does not provide these values yet.
   // Keep them permissive for now.
