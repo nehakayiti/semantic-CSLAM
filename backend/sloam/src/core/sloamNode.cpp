@@ -111,6 +111,15 @@ SLOAMNode::SLOAMNode(const ros::NodeHandle &nh)
   // initialize the runtime analysis variables 
   runtime_analysis_file = save_runtime_analysis_dir_ + "/robot"+std::to_string(hostRobotID)+"_runtime_analysis.txt";
   ROS_DEBUG_STREAM("THE RUNTIME ANALYSIS FILE IS: " << runtime_analysis_file);
+
+  // csv file for inter-robot loop closure stability evaluation
+  inter_robot_stability_eval_csv_file_ =
+      save_results_dir_ + "/robot" + std::to_string(hostRobotID) +
+      "_inter_robot_lc_stability_eval.csv";
+  inter_robot_stability_eval_logger_.setPath(
+      inter_robot_stability_eval_csv_file_);
+  ROS_INFO_STREAM("INTER ROBOT LC STABILITY EVAL CSV FILE IS: "
+                  << inter_robot_stability_eval_csv_file_);
 }
 
 SLOAMNode::~SLOAMNode() {
@@ -637,6 +646,26 @@ void SLOAMNode::interLoopClosureThread_() {
           dbMutex.lock();
           dbManager.loopClosureTf[query_robot_id] = accepted->TF_target_to_host;
           dbMutex.unlock();
+
+          // for inter-robot loop closure stability evaluation
+          if (save_inter_robot_stability_eval_) {
+            std::lock_guard<std::mutex> eval_lock(
+                inter_robot_stability_eval_mtx_);
+            PendingInterRobotStabilityEvalEvent pending_event;
+            pending_event.event_id =
+                inter_robot_stability_eval_event_counter_++;
+            pending_event.hostRobotID = dbManager.getHostRobotID();
+            pending_event.targetRobotID = query_robot_id;
+            pending_event.TF_target_to_host = accepted->TF_target_to_host;
+            pending_event.repeatCount = accepted->repeatCount;
+            pending_event.accepted_stamp = ros::Time::now();
+            pending_event.reference_map_size = reference_map.size();
+            pending_event.query_map_size = query_map.size();
+
+            pending_inter_robot_stability_eval_events_[query_robot_id] =
+                pending_event;
+          }
+
         } else {
           ROS_WARN_STREAM("INTER LOOP CLOSURE REJECTED BY BUFFER BETWEEN ROBOTS: "
                           << query_robot_id << " AND "
@@ -810,6 +839,32 @@ bool SLOAMNode::runSLOAMNode(const SE3 &relativeRawOdomMotion,
         // ROS_INFO_STREAM("current number of ellipsoids:"
         //                 << ellipsoid_semantic_map_.getRawMap().size());
       }
+
+      // for inter-robot loop closure stability evaluation
+      bool should_log_inter_robot_stability_eval = false;
+      PendingInterRobotStabilityEvalEvent pending_inter_robot_stability_eval_event;
+      std::vector<SE3> host_trajectory_before_eval;
+      std::vector<size_t> host_pose_inds_before_eval;
+      std::vector<SE3> target_trajectory_before_eval;
+      std::vector<size_t> target_pose_inds_before_eval;
+
+      if (save_inter_robot_stability_eval_ && curBmFG < curSize) {
+        std::lock_guard<std::mutex> eval_lock(
+            inter_robot_stability_eval_mtx_);
+        auto pending_it =
+            pending_inter_robot_stability_eval_events_.find(curRobotID);
+        if (pending_it !=
+            pending_inter_robot_stability_eval_events_.end()) {
+          should_log_inter_robot_stability_eval = true;
+          pending_inter_robot_stability_eval_event = pending_it->second;
+
+          factorGraph_.getAllPoses(host_trajectory_before_eval,
+                                   host_pose_inds_before_eval, hostRobotID);
+          factorGraph_.getAllPoses(target_trajectory_before_eval,
+                                   target_pose_inds_before_eval, curRobotID);
+        }
+      }
+
       for (int i = curBmFG; i < curSize; i++) {
         SE3 poseEstimateInRefFrame = dbManager.loopClosureTf[curRobotID] *
                                      iter->second.poseMstPacket[i].keyPose;
@@ -872,6 +927,37 @@ bool SLOAMNode::runSLOAMNode(const SE3 &relativeRawOdomMotion,
             false);
       }
       factorGraph_.solve();
+
+      // inter-robot loop closure stability evaluation
+      if (save_inter_robot_stability_eval_ &&
+          should_log_inter_robot_stability_eval) {
+        std::vector<SE3> host_trajectory_after_eval;
+        std::vector<size_t> host_pose_inds_after_eval;
+        std::vector<SE3> target_trajectory_after_eval;
+        std::vector<size_t> target_pose_inds_after_eval;
+
+        factorGraph_.getAllPoses(host_trajectory_after_eval,
+                                 host_pose_inds_after_eval, hostRobotID);
+        factorGraph_.getAllPoses(target_trajectory_after_eval,
+                                 target_pose_inds_after_eval, curRobotID);
+
+        TrajectoryJumpStats host_jump_stats =
+            computeTrajectoryJumpStats(host_trajectory_before_eval,
+                                       host_trajectory_after_eval);
+        TrajectoryJumpStats target_jump_stats =
+            computeTrajectoryJumpStats(target_trajectory_before_eval,
+                                       target_trajectory_after_eval);
+
+        inter_robot_stability_eval_logger_.logAcceptedSolve(
+            pending_inter_robot_stability_eval_event,
+            host_jump_stats,
+            target_jump_stats);
+
+        std::lock_guard<std::mutex> eval_lock(
+            inter_robot_stability_eval_mtx_);
+        pending_inter_robot_stability_eval_events_.erase(curRobotID);
+      }
+
       dbManager.updateFGBookmark(curSize, curRobotID);
     }
     // if LC not found yet: loop through the rest pose measurement pair to
