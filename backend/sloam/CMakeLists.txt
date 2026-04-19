@@ -98,7 +98,7 @@ cc_library(
 
 cc_library(
   NAME core
-  INCS include/core ${CLIPPER_DIR}/include
+  INCS include ${CLIPPER_DIR}/include
   SRCS "src/core/sloam.cpp" "src/core/robot.cpp" "src/core/databaseManager.cpp" "src/core/place_recognition.cpp" "src/core/candidate_loop_closure_buffer.cpp"
   DEPS sloam_log sloam_base sloam_objects sloam_viz sloam_map sloam_factorgraph Eigen3::Eigen gtsam ${catkin_LIBRARIES} -ldw
   DEFINES USE_CLIPPER=${CLIPPER_VALUE}
