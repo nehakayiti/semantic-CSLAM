@@ -51,6 +51,7 @@
 
 #include <unordered_map>
 #include <inter_robot_lc_stability_eval.h>
+#include <inter_robot_lc_candidate_eval.h>
 
 using Point = pcl::PointXYZI;
 using Cloud = pcl::PointCloud<Point>;
@@ -205,17 +206,24 @@ class SLOAMNode : public sloam {
                          std::vector<SE3> &submapCentroids, const SE3 &pose,
                          const double &radius);
 
-  // inter-robot loop closure candidate buffer
+   // inter-robot loop closure candidate buffer
   CandidateLoopClosureBuffer::Params inter_lc_buffer_params_;
   std::unique_ptr<CandidateLoopClosureBuffer> candidate_loop_closure_buffer_;
 
-// inter-robot loop closure stability evaluation
+  // inter-robot loop closure stability evaluation
   bool save_inter_robot_stability_eval_ = true;
   string inter_robot_stability_eval_csv_file_;
   InterRobotLCStabilityEvalLogger inter_robot_stability_eval_logger_;
   std::mutex inter_robot_stability_eval_mtx_;
-  std::unordered_map<int, PendingInterRobotStabilityEvalEvent> pending_inter_robot_stability_eval_events_;
+  std::unordered_map<int, PendingInterRobotStabilityEvalEvent>
+      pending_inter_robot_stability_eval_events_;
   int inter_robot_stability_eval_event_counter_ = 0;
+
+  // inter-robot loop closure candidate decision evaluation
+  bool save_inter_robot_candidate_eval_ = true;
+  string inter_robot_candidate_eval_csv_file_;
+  InterRobotLCCandidateEvalLogger inter_robot_candidate_eval_logger_;
+  int inter_robot_candidate_eval_event_counter_ = 0;
 
 };
 }  // namespace sloam

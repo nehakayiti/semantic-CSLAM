@@ -120,6 +120,14 @@ SLOAMNode::SLOAMNode(const ros::NodeHandle &nh)
       inter_robot_stability_eval_csv_file_);
   ROS_INFO_STREAM("INTER ROBOT LC STABILITY EVAL CSV FILE IS: "
                   << inter_robot_stability_eval_csv_file_);
+
+  inter_robot_candidate_eval_csv_file_ =
+      save_results_dir_ + "/robot" + std::to_string(hostRobotID) +
+      "_inter_robot_lc_candidate_eval.csv";
+  inter_robot_candidate_eval_logger_.setPath(
+      inter_robot_candidate_eval_csv_file_);
+  ROS_INFO_STREAM("INTER ROBOT LC CANDIDATE EVAL CSV FILE IS: "
+                  << inter_robot_candidate_eval_csv_file_);
 }
 
 SLOAMNode::~SLOAMNode() {
@@ -602,17 +610,32 @@ void SLOAMNode::interLoopClosureThread_() {
       
         SE3 tfFromQuery2RefSE3 = SE3(tfFromQuery2Ref);
 
-        // Pass the found inter-robot loop closure through the buffer
+        /// pass through buffer
         LoopClosureCandidate candidate;
         candidate.hostRobotID = dbManager.getHostRobotID();
         candidate.targetRobotID = query_robot_id;
-        //candidate.hostPoseIdx = 0;
-        //candidate.targetPoseIdx = 0;
         candidate.TF_target_to_host = tfFromQuery2RefSE3;
 
-        auto accepted = candidate_loop_closure_buffer_->addCandidate(candidate);
+        CandidateLoopClosureDecision decision =
+            candidate_loop_closure_buffer_->addCandidateWithDecision(candidate);
 
-        if (accepted.has_value()) {
+        if (save_inter_robot_candidate_eval_) {
+          inter_robot_candidate_eval_logger_.logCandidateDecision(
+              inter_robot_candidate_eval_event_counter_++,
+              ros::Time::now(),
+              candidate.hostRobotID,
+              candidate.targetRobotID,
+              candidate.TF_target_to_host,
+              decision.repeatCount,
+              decision.accepted ? "accepted" : "rejected",
+              reference_map.size(),
+              query_map.size());
+        }
+
+        if (decision.accepted && decision.acceptedLoopClosure.has_value()) {
+          const AcceptedLoopClosure& accepted =
+              decision.acceptedLoopClosure.value();
+
           num_successful_inter_loop_closure++;
           last_inter_loop_closure_stamp_ = ros::Time::now();
 
@@ -625,13 +648,14 @@ void SLOAMNode::interLoopClosureThread_() {
                           << dbManager.getHostRobotID());
 
           ROS_INFO_STREAM(
-            "Inter Loop Closure took "
-            << (inter_loop_closure_end - inter_loop_closure_start).toSec()
-            << " seconds"
-            << "to match two maps with size " << reference_map.size() << " and "
-            << query_map.size());
-          // print tfFromQuery2Ref
-          ROS_INFO_STREAM("relatively transformation tfFromQuery2Ref is: " << tfFromQuery2Ref);
+              "Inter Loop Closure took "
+              << (inter_loop_closure_end - inter_loop_closure_start).toSec()
+              << " seconds"
+              << "to match two maps with size " << reference_map.size()
+              << " and " << query_map.size());
+
+          ROS_INFO_STREAM("relatively transformation tfFromQuery2Ref is: "
+                          << tfFromQuery2Ref);
           ROS_WARN_STREAM("Saving inter robot TF results");
 
           if (save_inter_robot_closure_results_) {
@@ -650,10 +674,9 @@ void SLOAMNode::interLoopClosureThread_() {
           }
 
           dbMutex.lock();
-          dbManager.loopClosureTf[query_robot_id] = accepted->TF_target_to_host;
+          dbManager.loopClosureTf[query_robot_id] = accepted.TF_target_to_host;
           dbMutex.unlock();
 
-          // for inter-robot loop closure stability evaluation
           if (save_inter_robot_stability_eval_) {
             std::lock_guard<std::mutex> eval_lock(
                 inter_robot_stability_eval_mtx_);
@@ -662,8 +685,8 @@ void SLOAMNode::interLoopClosureThread_() {
                 inter_robot_stability_eval_event_counter_++;
             pending_event.hostRobotID = dbManager.getHostRobotID();
             pending_event.targetRobotID = query_robot_id;
-            pending_event.TF_target_to_host = accepted->TF_target_to_host;
-            pending_event.repeatCount = accepted->repeatCount;
+            pending_event.TF_target_to_host = accepted.TF_target_to_host;
+            pending_event.repeatCount = accepted.repeatCount;
             pending_event.accepted_stamp = ros::Time::now();
             pending_event.reference_map_size = reference_map.size();
             pending_event.query_map_size = query_map.size();
@@ -671,11 +694,11 @@ void SLOAMNode::interLoopClosureThread_() {
             pending_inter_robot_stability_eval_events_[query_robot_id] =
                 pending_event;
           }
-
         } else {
           ROS_WARN_STREAM("INTER LOOP CLOSURE REJECTED BY BUFFER BETWEEN ROBOTS: "
                           << query_robot_id << " AND "
-                          << dbManager.getHostRobotID());
+                          << dbManager.getHostRobotID()
+                          << ", repeatCount=" << decision.repeatCount);
         }
       }
     }

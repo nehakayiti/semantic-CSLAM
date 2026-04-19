@@ -9,7 +9,16 @@ CandidateLoopClosureBuffer::CandidateLoopClosureBuffer(const Params& params)
     : params_(params) {
 }
 
-std::optional<AcceptedLoopClosure> CandidateLoopClosureBuffer::addCandidate(const LoopClosureCandidate& candidate) {
+std::optional<AcceptedLoopClosure> CandidateLoopClosureBuffer::addCandidate(
+    const LoopClosureCandidate& candidate) {
+    CandidateLoopClosureDecision decision = addCandidateWithDecision(candidate);
+    return decision.acceptedLoopClosure;
+}
+
+CandidateLoopClosureDecision CandidateLoopClosureBuffer::addCandidateWithDecision(
+    const LoopClosureCandidate& candidate) {
+    CandidateLoopClosureDecision decision;
+
     // Always keep the candidate in the rolling buffer.
     buffer.push_back(candidate);
 
@@ -17,61 +26,45 @@ std::optional<AcceptedLoopClosure> CandidateLoopClosureBuffer::addCandidate(cons
         buffer.pop_front();
     }
 
-    // // First check basic quality on the candidate itself.
-    // if (!isQualityGood(candidate)) {
-    //     return std::nullopt;
-    // }
-
     // Count how many recent candidates are consistent with this one.
-    int repeat_count = countConsistentMatches(candidate);
+    const int repeat_count = countConsistentMatches(candidate);
+    decision.repeatCount = repeat_count;
 
     if (repeat_count < params_.repeat_count_threshold) {
-        return std::nullopt;
+        decision.accepted = false;
+        decision.acceptedLoopClosure = std::nullopt;
+        return decision;
     }
 
-    // Build accepted loop closure result.
     AcceptedLoopClosure accepted;
     accepted.hostRobotID = candidate.hostRobotID;
     accepted.targetRobotID = candidate.targetRobotID;
-    //accepted.hostPoseIdx = candidate.hostPoseIdx;
-    //accepted.targetPoseIdx = candidate.targetPoseIdx;
     accepted.TF_target_to_host = candidate.TF_target_to_host;
     accepted.repeatCount = repeat_count;
-    //accepted.inlierCount = candidate.inlierCount;
-    //accepted.residual = candidate.residual;
 
-    return accepted;
+    decision.accepted = true;
+    decision.acceptedLoopClosure = accepted;
+    return decision;
 }
 
 void CandidateLoopClosureBuffer::clear() {
     buffer.clear();
 }
 
-// bool CandidateLoopClosureBuffer::isQualityGood(const LoopClosureCandidate& candidate) const {
-//     if (candidate.inlierCount < params_.minimum_inliers) {
-//         return false;
-//     }
-
-//     if (candidate.residual > params_.maximum_residual) {
-//         return false;
-//     }
-
-//     return true;
-// }
-
-bool CandidateLoopClosureBuffer::isSameRobotPair(const LoopClosureCandidate& a, const LoopClosureCandidate& b) const {
+bool CandidateLoopClosureBuffer::isSameRobotPair(
+    const LoopClosureCandidate& a,
+    const LoopClosureCandidate& b) const {
     return (a.hostRobotID == b.hostRobotID) &&
            (a.targetRobotID == b.targetRobotID);
 }
 
-// bool CandidateLoopClosureBuffer::isNearbyPosePair(const LoopClosureCandidate& a, const LoopClosureCandidate& b) const {
-//     return (std::abs(a.hostPoseIdx - b.hostPoseIdx) <= params_.max_pose_index_diff) &&
-//            (std::abs(a.targetPoseIdx - b.targetPoseIdx) <= params_.max_pose_index_diff);
-// }
-
-bool CandidateLoopClosureBuffer::isTransformConsistent(const LoopClosureCandidate& a, const LoopClosureCandidate& b) const {
-    double translation_diff = translationDifference(a.TF_target_to_host, b.TF_target_to_host);
-    double rotation_diff_deg = rotationDifferenceDeg(a.TF_target_to_host, b.TF_target_to_host);
+bool CandidateLoopClosureBuffer::isTransformConsistent(
+    const LoopClosureCandidate& a,
+    const LoopClosureCandidate& b) const {
+    double translation_diff =
+        translationDifference(a.TF_target_to_host, b.TF_target_to_host);
+    double rotation_diff_deg =
+        rotationDifferenceDeg(a.TF_target_to_host, b.TF_target_to_host);
 
     if (translation_diff > params_.max_translation_diff) {
         return false;
@@ -84,12 +77,17 @@ bool CandidateLoopClosureBuffer::isTransformConsistent(const LoopClosureCandidat
     return true;
 }
 
-double CandidateLoopClosureBuffer::translationDifference(const SE3& a, const SE3& b) const {
+double CandidateLoopClosureBuffer::translationDifference(
+    const SE3& a,
+    const SE3& b) const {
     return (a.translation() - b.translation()).norm();
 }
 
-double CandidateLoopClosureBuffer::rotationDifferenceDeg(const SE3& a, const SE3& b) const {
-    Eigen::Matrix3d R_rel = a.so3().matrix().transpose() * b.so3().matrix();
+double CandidateLoopClosureBuffer::rotationDifferenceDeg(
+    const SE3& a,
+    const SE3& b) const {
+    Eigen::Matrix3d R_rel =
+        a.so3().matrix().transpose() * b.so3().matrix();
     double trace_val = R_rel.trace();
     double cos_angle = (trace_val - 1.0) / 2.0;
 
@@ -99,21 +97,14 @@ double CandidateLoopClosureBuffer::rotationDifferenceDeg(const SE3& a, const SE3
     return angle_rad * 180.0 / M_PI;
 }
 
-int CandidateLoopClosureBuffer::countConsistentMatches(const LoopClosureCandidate& candidate) const {
+int CandidateLoopClosureBuffer::countConsistentMatches(
+    const LoopClosureCandidate& candidate) const {
     int count = 0;
 
     for (const auto& old_candidate : buffer) {
         if (!isSameRobotPair(candidate, old_candidate)) {
             continue;
         }
-
-        // if (!isNearbyPosePair(candidate, old_candidate)) {
-        //     continue;
-        // }
-
-        // if (!isQualityGood(old_candidate)) {
-        //     continue;
-        // }
 
         if (!isTransformConsistent(candidate, old_candidate)) {
             continue;
