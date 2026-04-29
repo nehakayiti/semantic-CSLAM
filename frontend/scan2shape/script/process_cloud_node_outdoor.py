@@ -24,7 +24,8 @@ class ProcessCloudNode:
     def __init__(self, node_name):
 
         ################################## IMPORTANT PARAMS ##################################
-        robot_name = rospy.get_param("/robot_name", default="robot0")
+        ns = rospy.get_namespace().strip('/')
+        robot_name = ns if ns else rospy.get_param("/robot_name", default="robot0")
         param_name_prefix = f"/{robot_name}/{node_name}/"
         self.run_kitti = rospy.get_param(param_name_prefix + "run_kitti", default=False)
 
@@ -138,7 +139,7 @@ class ProcessCloudNode:
         self.pc_point_step = rospy.get_param(
             param_name_prefix+"pc_point_step", default=16)
 
-        seg_pc_namespace = "/os_node"
+        seg_pc_namespace = rospy.get_param(param_name_prefix+"seg_pc_namespace", default="/os_node")
         odom_topic = "/Odometry"
 
         # CONTAINERS
@@ -181,11 +182,11 @@ class ProcessCloudNode:
         # defining frame ids
         if self.use_sim == False:
             # range image frame
-            self.range_image_frame = "body"
-            self.reference_frame = "odom"
+            self.range_image_frame = rospy.get_param(param_name_prefix+"range_image_frame", default="body")
+            self.reference_frame = rospy.get_param(param_name_prefix+"reference_frame", default="odom")
             self.faster_lio_world_frame = "camera_init"
             # undistorted point cloud frame
-            self.undistorted_cloud_frame = "lidar"
+            self.undistorted_cloud_frame = rospy.get_param(param_name_prefix+"undistorted_cloud_frame", default="lidar")
         else:
             self.range_image_frame = "quadrotor"
             self.undistorted_cloud_frame = "quadrotor"

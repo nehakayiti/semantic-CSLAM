@@ -76,9 +76,9 @@ class Inference:
         self.info_ = None
         self.pc_fields_ = self.make_fields()
 
-        # Subscriber for using point cloud from Faster-LIO
+        # Subscriber for GrAco VLP-16
         self.scan_sub_ = rospy.Subscriber(
-            "/cloud_registered_body", PointCloud2, callback=self.pc_cb, queue_size=1)
+            "/velodyne/points", PointCloud2, callback=self.pc_cb, queue_size=1)
         # Publisher for publishing segmented point cloud
         self.pc_pub_ = rospy.Publisher(
             namespace+"/segmented_point_cloud_no_destagger", PointCloud2, queue_size=1)
@@ -159,6 +159,18 @@ class Inference:
         # Load into the LaserScan class to do inference
         self.scan_obj_.open_scan(points_xyz=points_xyz.copy(),
                                  points_intensity=points_intensity)
+
+        # VLP-16 upsampling: nearest-neighbor fill empty rows in projected range image
+        # so RangeNet++ (trained on 64-ring Ouster) receives a dense 64x1024 input
+        populated = np.where(np.any(self.scan_obj_.proj_range >= 0, axis=1))[0]
+        if len(populated) > 0:
+            for r in range(self.scan_obj_.proj_range.shape[0]):
+                if not np.any(self.scan_obj_.proj_range[r] >= 0):
+                    nearest = populated[np.argmin(np.abs(populated - r))]
+                    self.scan_obj_.proj_range[r] = self.scan_obj_.proj_range[nearest]
+                    self.scan_obj_.proj_xyz[r] = self.scan_obj_.proj_xyz[nearest]
+                    self.scan_obj_.proj_remission[r] = self.scan_obj_.proj_remission[nearest]
+                    self.scan_obj_.proj_mask[r] = self.scan_obj_.proj_mask[nearest]
 
         # make a tensor of the uncompressed data (with the max num points)
         unproj_n_points = self.scan_obj_.points.shape[0]
@@ -273,8 +285,8 @@ class Inference:
             pc_msg.header.frame_id = "body"
             rospy.logwarn_throttle(
                 30, "Segmented point cloud is currently hardcoded to be published in \"body\" frame. Please change it to the correct frame if needed.")
-            pc_msg.width = self.pc_width
-            pc_msg.height = self.pc_height
+            pc_msg.width = 1024
+            pc_msg.height = 64
             pc_msg.point_step = self.pc_point_step
             pc_msg.row_step = pc_msg.width * pc_msg.point_step
             pc_msg.fields = self.pc_fields_

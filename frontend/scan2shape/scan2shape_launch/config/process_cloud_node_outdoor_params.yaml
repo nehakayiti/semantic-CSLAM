@@ -38,7 +38,7 @@ use_sim: False
 # visualize all cuboid instances (keep track of all and never remove tracks), should be set as False unless debugging
 track_always_visualize: False
 # Cuboid dim threshold used to start initial object tracking process
-fit_cuboid_dim_thresh: 0.5
+fit_cuboid_dim_thresh: 0.2
 # Resolution to perform voxel downsampling for accumulated instance point cloud. -1 means no downsample
 downsample_res: -1
 # only keep the most recent num_points_limit_per_instance for any segmented point cloud instance while tracking it

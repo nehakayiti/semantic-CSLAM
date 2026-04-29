@@ -173,6 +173,9 @@ class CylinderPlaneModeller:
         # extract xyz from the cloud
         cloud_points = np.array(list(pc2.read_points(
             original_cloud, skip_nans=True, field_names=("x", "y", "z"))))
+        # filter out near-zero invalid points that slip through skip_nans (range image artifacts)
+        if cloud_points.shape[0] > 0:
+            cloud_points = cloud_points[np.linalg.norm(cloud_points, axis=1) > 0.1]
         # check if tree cloud points is more than a given threshold
         # TODO(ankit): remove hardcoded value for minimum tree points in cloud
         if cloud_points.shape[0] > 40: # 40 is the minimum number of points in the tree cloud

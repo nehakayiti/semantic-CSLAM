@@ -166,7 +166,7 @@ def transform_publish_pc(process_cloud_node_object, current_timestamp, pc_xyzi_t
     try:
         # transform data from the source_frame into the target_frame
         (t_world_pano, quat_world_pano) = process_cloud_node_object.tf_listener2.lookupTransform(
-            process_cloud_node_object.undistorted_cloud_frame, process_cloud_node_object.reference_frame, current_timestamp)
+            process_cloud_node_object.undistorted_cloud_frame, process_cloud_node_object.reference_frame, rospy.Time(0))
         r_world_pano = R.from_quat(quat_world_pano)
         H_world_pano_rot = r_world_pano.as_matrix()
         H_world_pano_trans = np.array(t_world_pano)
@@ -222,7 +222,7 @@ def transform_publish_pc(process_cloud_node_object, current_timestamp, pc_xyzi_t
         try:
             # transform data in the source_frame into the target_frame
             (t_body_pano, quat_body_pano) = process_cloud_node_object.tf_listener2.lookupTransform(
-                process_cloud_node_object.undistorted_cloud_frame, process_cloud_node_object.range_image_frame, current_timestamp)
+                process_cloud_node_object.undistorted_cloud_frame, process_cloud_node_object.range_image_frame, rospy.Time(0))
             r_body_pano = R.from_quat(quat_body_pano)
             H_body_pano_rot = r_body_pano.as_matrix()
             H_body_pano_trans = np.array(t_body_pano)

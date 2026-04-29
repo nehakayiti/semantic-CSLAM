@@ -12,17 +12,17 @@ angle_cutoff: 15
 radius_cutoff: [0.05, 0.5]
 
 # The minimum number of points required for a point cloud to be considered as a valid cylinder fitting object.
-min_points_per_tree: 15
+min_points_per_tree: 5
 
 # The minimum number of points required in the point cloud ring to calculate the radius of the cylinder.
-min_points_for_radius: 5
+min_points_for_radius: 3
 
 # The minimum number of points required to fit a plane model to the ground points.
 min_points_per_ground_patch: 40
 
 # DBSCAN parameters for clustering of the tree point clouds to generate tree instance point clouds.
 clus_eps: 0.5
-clus_min_samples: 10
+clus_min_samples: 5
 
 # Rate at which the cylinder fitting function is run to process the tree point cloud data
 # Rate = 1/run_rate
